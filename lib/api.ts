@@ -26,13 +26,32 @@ export async function runCommand(
   return data.output;
 }
 
-export async function checkHealth(): Promise<boolean> {
+// Richer health status — distinguishes timeout vs network error
+export type HealthStatus =
+  | { state: "checking" }
+  | { state: "online"; ai: string }
+  | { state: "offline"; reason: string };
+
+export async function checkHealth(): Promise<HealthStatus> {
   try {
     const res = await fetch(`${API_BASE}/health`, {
       signal: AbortSignal.timeout(5000),
     });
-    return res.ok;
-  } catch {
-    return false;
+    if (res.ok) {
+      const data = (await res.json()) as { status: string; ai: string };
+      return { state: "online", ai: data.ai ?? "" };
+    }
+    return { state: "offline", reason: `server error ${res.status}` };
+  } catch (err) {
+    const isTimeout =
+      err instanceof DOMException &&
+      (err.name === "TimeoutError" || err.name === "AbortError");
+    if (isTimeout) {
+      return { state: "offline", reason: "timeout — is Tailscale on?" };
+    }
+    return {
+      state: "offline",
+      reason: "unreachable — is run_all.py running?",
+    };
   }
 }

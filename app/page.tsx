@@ -1,43 +1,136 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
-import { Loader2, Terminal, WifiOff } from "lucide-react";
-import { runCommand, checkHealth } from "@/lib/api";
+import {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  type ChangeEvent,
+  type KeyboardEvent,
+} from "react";
+import { runCommand, checkHealth, type HealthStatus } from "@/lib/api";
 import { OutputArea } from "@/components/OutputArea";
 import { Section } from "@/components/Section";
 
+// ── Types ──────────────────────────────────────────────────────
+
 type RunFn = (command: string, args?: string) => Promise<void>;
 
-// ── Reusable sub-components ───────────────────────────────────
+// ── Ecommerce tabs config ──────────────────────────────────────
 
-function QuickAction({
-  label,
-  emoji,
-  command,
-  args = "",
-  onRun,
-  loading,
-}: {
-  label: string;
-  emoji: string;
-  command: string;
-  args?: string;
-  onRun: RunFn;
-  loading: boolean;
-}) {
+const ECOM_PRIMARY = [
+  {
+    id: "pdp",
+    label: "PDP",
+    placeholder: "Sonny Corduroy Hat, Moss Green, $98, 100% cotton, made in Portugal…",
+    multiline: false,
+  },
+  {
+    id: "tiktok",
+    label: "TikTok",
+    placeholder: "Product name, price, key selling point, brand name…",
+    multiline: false,
+  },
+  {
+    id: "meta",
+    label: "Meta",
+    placeholder: "Product name, price, key benefit, AOV target…",
+    multiline: false,
+  },
+  {
+    id: "contentcal",
+    label: "Calendar",
+    placeholder: "Month, active products, planned email campaigns…",
+    multiline: false,
+  },
+] as const;
+
+const ECOM_SECONDARY = [
+  {
+    id: "emailaudit",
+    label: "Email Audit",
+    placeholder: "Describe your email flows or paste content…",
+    multiline: true,
+  },
+  {
+    id: "reel",
+    label: "Reel Script",
+    placeholder: "Footage desc, platform (Reels/TikTok), tone, any key moment…",
+    multiline: true,
+  },
+] as const;
+
+// ── Status bar ─────────────────────────────────────────────────
+
+function StatusBar({ health }: { health: HealthStatus }) {
+  if (health.state === "checking") {
+    return (
+      <span style={{ color: "var(--text-faint)", fontSize: "11px" }}>
+        ● checking
+        <span className="dot-1">.</span>
+        <span className="dot-2">.</span>
+        <span className="dot-3">.</span>
+      </span>
+    );
+  }
+
+  if (health.state === "online") {
+    // Parse AI status string into compact display
+    const ai = health.ai
+      .replace(/✅/g, "ok")
+      .replace(/❌[^|]*/g, "–")
+      .replace(/⚠️[^|]*/g, "⚠")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    return (
+      <span style={{ color: "var(--green)", fontSize: "11px", letterSpacing: "0.02em" }}>
+        ● tailscale:connected{" "}
+        <span style={{ color: "var(--text-faint)", fontSize: "10px" }}>| {ai}</span>
+      </span>
+    );
+  }
+
   return (
-    <button
-      onClick={() => onRun(command, args)}
-      disabled={loading}
-      className="flex flex-col items-start gap-1.5 bg-zinc-900 border border-zinc-800 rounded-xl p-4 min-h-[72px] w-full text-left hover:bg-zinc-800 active:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-    >
-      <span className="text-xl leading-none">{emoji}</span>
-      <span className="text-sm font-medium text-zinc-100 leading-tight">{label}</span>
-    </button>
+    <span style={{ color: "var(--red)", fontSize: "11px" }}>
+      ● {health.reason}
+    </span>
   );
 }
 
-function CommandInput({
+// ── Loading indicator ──────────────────────────────────────────
+
+function Thinking({ command }: { command: string }) {
+  return (
+    <div
+      style={{
+        padding: "10px 14px",
+        border: "1px solid var(--border)",
+        borderLeft: "2px solid var(--amber)",
+        borderRadius: "4px",
+        fontSize: "12px",
+        color: "var(--text-dim)",
+        background: "var(--amber-glow)",
+        display: "flex",
+        alignItems: "center",
+        gap: "10px",
+      }}
+    >
+      <span style={{ color: "var(--amber)" }}>{"$"}</span>
+      <span>/{command}</span>
+      <span style={{ color: "var(--text-faint)" }}>executing</span>
+      <span style={{ color: "var(--amber)" }}>
+        <span className="dot-1">·</span>
+        <span className="dot-2">·</span>
+        <span className="dot-3">·</span>
+      </span>
+    </div>
+  );
+}
+
+// ── Command input field ────────────────────────────────────────
+
+function CmdField({
   label,
   placeholder,
   command,
@@ -55,45 +148,50 @@ function CommandInput({
   const [value, setValue] = useState("");
 
   function handleSubmit() {
-    if (!value.trim()) return;
+    if (!value.trim() || loading) return;
     onRun(command, value.trim());
   }
 
   return (
-    <div className="space-y-1.5">
-      <label className="text-xs text-zinc-400 font-medium">{label}</label>
-      <div className="flex gap-2">
+    <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+      <label className="cmd-label">{label}</label>
+      <div style={{ display: "flex", gap: "6px", alignItems: "flex-start" }}>
         {multiline ? (
           <textarea
             value={value}
-            onChange={(e) => setValue(e.target.value)}
+            onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setValue(e.target.value)}
             placeholder={placeholder}
             rows={3}
-            className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-blue-500 resize-none"
+            className="cmd-input"
           />
         ) : (
           <input
             type="text"
             value={value}
-            onChange={(e) => setValue(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => setValue(e.target.value)}
+            onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
+              if (e.key === "Enter") handleSubmit();
+            }}
             placeholder={placeholder}
-            className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-blue-500"
+            className="cmd-input"
           />
         )}
         <button
           onClick={handleSubmit}
           disabled={loading || !value.trim()}
-          className="px-3 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg transition-colors shrink-0"
+          className="run-btn"
+          style={{ marginTop: multiline ? "0" : "0", flexShrink: 0 }}
         >
-          Run
+          run
         </button>
       </div>
     </div>
   );
 }
 
-function IconButtons({
+// ── Grid of icon-less buttons ──────────────────────────────────
+
+function CmdGrid({
   items,
   onRun,
   loading,
@@ -103,13 +201,32 @@ function IconButtons({
   loading: boolean;
 }) {
   return (
-    <div className="grid grid-cols-2 gap-2">
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" }}>
       {items.map(([label, cmd]) => (
         <button
           key={cmd}
           onClick={() => onRun(cmd)}
           disabled={loading}
-          className="py-3 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-sm font-medium transition-colors"
+          style={{
+            padding: "8px",
+            border: "1px solid var(--border)",
+            borderRadius: "4px",
+            background: "transparent",
+            color: "var(--text-dim)",
+            fontSize: "12px",
+            cursor: "pointer",
+            fontFamily: "var(--font-terminal)",
+            transition: "all 0.12s",
+            letterSpacing: "0.02em",
+          }}
+          onMouseEnter={(e) => {
+            (e.target as HTMLButtonElement).style.borderColor = "var(--border-2)";
+            (e.target as HTMLButtonElement).style.color = "var(--text)";
+          }}
+          onMouseLeave={(e) => {
+            (e.target as HTMLButtonElement).style.borderColor = "var(--border)";
+            (e.target as HTMLButtonElement).style.color = "var(--text-dim)";
+          }}
         >
           {label}
         </button>
@@ -118,69 +235,188 @@ function IconButtons({
   );
 }
 
-function UniversalCommand({ onRun, loading }: { onRun: RunFn; loading: boolean }) {
+// ── Ecommerce Tab Panel ────────────────────────────────────────
+
+function EcomPanel({ onRun, loading }: { onRun: RunFn; loading: boolean }) {
+  const [activeTab, setActiveTab] = useState<string>("pdp");
+  const [showSecondary, setShowSecondary] = useState(false);
+
+  const activeConfig = ECOM_PRIMARY.find((t) => t.id === activeTab)!;
+
+  return (
+    <div
+      style={{
+        border: "1px solid var(--border)",
+        borderRadius: "4px",
+        overflow: "hidden",
+      }}
+    >
+      {/* Tab strip */}
+      <div className="tab-strip" style={{ background: "var(--surface)" }}>
+        {ECOM_PRIMARY.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`tab-btn ${activeTab === tab.id ? "active" : ""}`}
+          >
+            {tab.label}
+          </button>
+        ))}
+        <div style={{ flex: 1 }} />
+        <button
+          onClick={() => setShowSecondary(!showSecondary)}
+          className="tab-btn"
+          style={{ color: showSecondary ? "var(--text-dim)" : "var(--text-faint)", fontSize: "11px" }}
+        >
+          {showSecondary ? "▲ less" : "▼ more"}
+        </button>
+      </div>
+
+      {/* Active tab content */}
+      <div style={{ padding: "12px 14px", background: "var(--surface)" }}>
+        <CmdField
+          key={activeConfig.id}
+          label={activeConfig.label}
+          placeholder={activeConfig.placeholder}
+          command={activeConfig.id}
+          multiline={activeConfig.multiline}
+          onRun={onRun}
+          loading={loading}
+        />
+      </div>
+
+      {/* Secondary tools (Email/Reel) */}
+      {showSecondary && (
+        <div
+          style={{
+            borderTop: "1px solid var(--border)",
+            padding: "12px 14px",
+            background: "var(--surface)",
+            display: "flex",
+            flexDirection: "column",
+            gap: "12px",
+          }}
+        >
+          <div
+            style={{
+              fontSize: "10px",
+              color: "var(--text-faint)",
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+            }}
+          >
+            secondary tools
+          </div>
+          {ECOM_SECONDARY.map((tool) => (
+            <CmdField
+              key={tool.id}
+              label={tool.label}
+              placeholder={tool.placeholder}
+              command={tool.id}
+              multiline={tool.multiline}
+              onRun={onRun}
+              loading={loading}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Universal command ──────────────────────────────────────────
+
+function UniversalCmd({ onRun, loading }: { onRun: RunFn; loading: boolean }) {
   const [input, setInput] = useState("");
 
   function handleSubmit() {
     const trimmed = input.trim();
-    if (!trimmed) return;
+    if (!trimmed || loading) return;
     const parts = trimmed.replace(/^\//, "").split(/\s+/);
-    const command = parts[0].toLowerCase();
-    const args = parts.slice(1).join(" ");
-    onRun(command, args);
+    onRun(parts[0].toLowerCase(), parts.slice(1).join(" "));
+    setInput("");
   }
 
   return (
-    <div className="space-y-2">
-      <p className="text-xs text-zinc-500">
-        Type any full command, e.g.{" "}
-        <code className="text-blue-400 text-xs">/kyn [job post]</code>{" "}
-        or{" "}
-        <code className="text-blue-400 text-xs">/learn react</code>
-      </p>
-      <div className="flex gap-2">
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
-          placeholder="/today   /pdp Sonny Hat   /idea add X"
-          className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-blue-500 font-mono"
-        />
+    <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+      <div
+        style={{
+          fontSize: "10px",
+          color: "var(--text-faint)",
+          letterSpacing: "0.06em",
+        }}
+      >
+        {"// any command: /kyn [post]  /learn react  /idea [desc]"}
+      </div>
+      <div style={{ display: "flex", gap: "6px" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            flex: 1,
+            background: "var(--surface-2)",
+            border: "1px solid var(--border)",
+            borderRadius: "4px",
+            padding: "0 10px",
+            gap: "6px",
+          }}
+        >
+          <span style={{ color: "var(--amber)", fontSize: "12px", flexShrink: 0 }}>$</span>
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+            placeholder="/today  /pdp Sonny Hat  /gaps"
+            style={{
+              flex: 1,
+              background: "transparent",
+              border: "none",
+              outline: "none",
+              color: "var(--text)",
+              fontSize: "12px",
+              fontFamily: "var(--font-terminal)",
+              padding: "8px 0",
+            }}
+          />
+        </div>
         <button
           onClick={handleSubmit}
           disabled={loading || !input.trim()}
-          className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-base font-bold rounded-lg transition-colors shrink-0"
+          className="run-btn"
         >
-          →
+          ↵
         </button>
       </div>
     </div>
   );
 }
 
-// ── Main Page ─────────────────────────────────────────────────
+// ── Main page ──────────────────────────────────────────────────
 
 export default function Page() {
-  const [health, setHealth] = useState<boolean | null>(null);
+  const [health, setHealth] = useState<HealthStatus>({ state: "checking" });
   const [loading, setLoading] = useState(false);
   const [output, setOutput] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeCommand, setActiveCommand] = useState("");
-  const outputRef = useRef<HTMLDivElement>(null);
+  const mobileOutputRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     checkHealth().then(setHealth);
-    const id = setInterval(() => checkHealth().then(setHealth), 30000);
+    const id = setInterval(() => checkHealth().then(setHealth), 30_000);
     return () => clearInterval(id);
   }, []);
 
+  // On mobile, scroll to output
   useEffect(() => {
-    if (output && outputRef.current) {
-      setTimeout(
-        () => outputRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
-        100
-      );
+    if (output && mobileOutputRef.current) {
+      setTimeout(() => {
+        mobileOutputRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      }, 80);
     }
   }, [output]);
 
@@ -194,118 +430,278 @@ export default function Page() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
       setError(msg);
-      setOutput(msg);
+      setOutput(`error: ${msg}`);
     } finally {
       setLoading(false);
       setActiveCommand("");
     }
   }, []);
 
-  return (
-    <div className="max-w-2xl mx-auto px-4 pb-16">
-      {/* Sticky header */}
-      <header className="sticky top-0 z-10 -mx-4 px-4 py-3 mb-6 bg-zinc-950/90 backdrop-blur-sm border-b border-zinc-800/60">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Terminal size={18} className="text-blue-400" />
-            <h1 className="text-lg font-bold tracking-tight">LJR.devOS</h1>
-          </div>
-
-          <div className="flex items-center gap-2">
-            {health === null ? (
-              <span className="text-zinc-500 text-xs">Checking…</span>
-            ) : health ? (
-              <>
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-green-400" />
-                </span>
-                <span className="text-green-400 text-xs font-medium">Online</span>
-              </>
-            ) : (
-              <>
-                <WifiOff size={13} className="text-red-400" />
-                <span className="text-red-400 text-xs font-medium">
-                  Offline — check Tailscale
-                </span>
-              </>
-            )}
-          </div>
+  // ── Controls panel (shared between mobile and desktop left col)
+  const controlsPanel = (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "0",
+        height: "100%",
+        overflow: "hidden",
+      }}
+    >
+      {/* ── Header ── */}
+      <div
+        style={{
+          padding: "14px 16px 12px",
+          borderBottom: "1px solid var(--border)",
+          flexShrink: 0,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+            marginBottom: "6px",
+          }}
+        >
+          <span style={{ color: "var(--text-dim)", fontSize: "12px" }}>
+            lebron
+          </span>
+          <span style={{ color: "var(--text-faint)" }}>@</span>
+          <span style={{ color: "var(--amber)", fontSize: "12px", fontWeight: 600 }}>
+            ljros
+          </span>
+          <span style={{ color: "var(--text-faint)" }}>:~$</span>
+          <span
+            className="cursor-blink"
+            style={{
+              display: "inline-block",
+              width: "8px",
+              height: "14px",
+              background: "var(--amber)",
+              verticalAlign: "middle",
+              marginLeft: "2px",
+            }}
+          />
         </div>
-      </header>
+        <StatusBar health={health} />
+      </div>
 
-      <div className="space-y-4">
-        {/* Loading banner */}
-        {loading && (
-          <div className="flex items-center gap-3 px-4 py-3 bg-blue-950/40 border border-blue-900/50 rounded-xl text-blue-300 text-sm">
-            <Loader2 size={15} className="animate-spin shrink-0" />
-            <span>
-              Running{" "}
-              <code className="text-blue-200 bg-blue-950/50 px-1 rounded text-xs">
-                /{activeCommand}
-              </code>
-              {" "}— AI may take 10–30s…
-            </span>
-          </div>
-        )}
-
-        {/* Quick Actions */}
+      {/* Scrollable controls body */}
+      <div
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          padding: "12px 14px",
+          display: "flex",
+          flexDirection: "column",
+          gap: "10px",
+        }}
+      >
+        {/* ── Quick actions ── */}
         <div>
-          <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">
-            Quick Actions
-          </p>
-          <div className="grid grid-cols-2 gap-3">
-            <QuickAction emoji="📅" label="Today's Schedule" command="today" onRun={run} loading={loading} />
-            <QuickAction emoji="📊" label="Overview" command="overview" onRun={run} loading={loading} />
-            <QuickAction emoji="💼" label="Applications" command="applications" onRun={run} loading={loading} />
-            <QuickAction emoji="⏱️" label="Hours This Week" command="hours" onRun={run} loading={loading} />
+          <div
+            style={{
+              fontSize: "10px",
+              color: "var(--text-faint)",
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              marginBottom: "7px",
+            }}
+          >
+            quick
+          </div>
+          <div
+            style={{
+              display: "flex",
+              gap: "6px",
+              overflowX: "auto",
+              paddingBottom: "4px",
+              scrollbarWidth: "none",
+            }}
+          >
+            {(
+              [
+                ["today", "today"],
+                ["overview", "overview"],
+                ["applications", "apps"],
+                ["hours", "hours"],
+                ["next", "next"],
+                ["morning", "brief"],
+                ["free", "free"],
+              ] as [string, string][]
+            ).map(([cmd, label]) => (
+              <button
+                key={cmd}
+                onClick={() => run(cmd)}
+                disabled={loading}
+                className="pill"
+              >
+                {label}
+              </button>
+            ))}
           </div>
         </div>
 
-        {/* Ecommerce AI Team */}
-        <Section title="Ecommerce AI Team" icon="🛍️" defaultOpen={true}>
-          <CommandInput label="PDP Generator" placeholder="Product name, price, material, story…" command="pdp" onRun={run} loading={loading} />
-          <CommandInput label="TikTok Shop Listing" placeholder="Product name, price, key selling point…" command="tiktok" onRun={run} loading={loading} />
-          <CommandInput label="Meta Ad Draft" placeholder="Product name, price, key benefit…" command="meta" onRun={run} loading={loading} />
-          <CommandInput label="Content Calendar" placeholder="Month, products, upcoming campaigns…" command="contentcal" onRun={run} loading={loading} />
-          <CommandInput label="Email Audit" placeholder="Describe your email flows or paste content…" command="emailaudit" multiline={true} onRun={run} loading={loading} />
-          <CommandInput label="Reel Script" placeholder="Footage, platform (Reels/TikTok), tone…" command="reel" multiline={true} onRun={run} loading={loading} />
-        </Section>
+        {/* Divider */}
+        <div style={{ height: "1px", background: "var(--border)" }} />
 
-        {/* Quick Reply */}
-        <Section title="Quick Reply" icon="💬">
-          <CommandInput label="Paste a message to reply to" placeholder="Hi Lebron, ready for Monday? — Jordan" command="reply" multiline={true} onRun={run} loading={loading} />
-        </Section>
+        {/* ── Ecommerce AI Team ── */}
+        <div>
+          <div
+            style={{
+              fontSize: "10px",
+              color: "var(--amber)",
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              marginBottom: "7px",
+              opacity: 0.8,
+            }}
+          >
+            {"// lazysun"}
+          </div>
+          <EcomPanel onRun={run} loading={loading} />
+        </div>
 
-        {/* Career */}
-        <Section title="Career" icon="🎯">
-          <CommandInput label="KYN Score" placeholder="Paste full job post…" command="kyn" multiline={true} onRun={run} loading={loading} />
-          <CommandInput label="Full Analysis + Cover Letter" placeholder="Job URL or paste post…" command="analyze" onRun={run} loading={loading} />
-          <IconButtons items={[["Follow-ups Due", "followup"], ["Stats", "stats"]]} onRun={run} loading={loading} />
-        </Section>
+        {/* Divider */}
+        <div style={{ height: "1px", background: "var(--border)" }} />
 
-        {/* Planning */}
-        <Section title="Planning" icon="🗓️">
-          <IconButtons
-            items={[["Morning Brief", "morning"], ["Next Action", "next"], ["Week Plan", "weekplan"], ["Free Slots", "free"]]}
+        {/* ── Quick reply ── */}
+        <Section title="reply" prefix="cmd">
+          <CmdField
+            label="message to reply to"
+            placeholder="Hi Lebron, ready for Monday? — Jordan"
+            command="reply"
+            multiline={true}
             onRun={run}
             loading={loading}
           />
-          <CommandInput label="Session Plan" placeholder="2h high  (hours + energy: high/medium/low)" command="plan" onRun={run} loading={loading} />
         </Section>
 
-        {/* Universal Command */}
-        <Section title="Universal Command" icon="⌨️">
-          <UniversalCommand onRun={run} loading={loading} />
+        {/* ── Career ── */}
+        <Section title="career" prefix="cmd">
+          <CmdField
+            label="kyn score"
+            placeholder="Paste full job post…"
+            command="kyn"
+            multiline={true}
+            onRun={run}
+            loading={loading}
+          />
+          <CmdField
+            label="analyze + cover letter"
+            placeholder="Job URL or post…"
+            command="analyze"
+            onRun={run}
+            loading={loading}
+          />
+          <CmdGrid
+            items={[
+              ["follow-ups", "followup"],
+              ["stats", "stats"],
+              ["projects", "projects"],
+              ["gaps", "gaps"],
+            ]}
+            onRun={run}
+            loading={loading}
+          />
         </Section>
 
-        {/* Output */}
-        {(output || error) && (
-          <div ref={outputRef}>
-            <OutputArea output={output ?? ""} error={error} />
+        {/* ── Planning ── */}
+        <Section title="planning" prefix="cmd">
+          <CmdGrid
+            items={[
+              ["morning brief", "morning"],
+              ["week plan", "weekplan"],
+              ["sprint", "sprint"],
+              ["free slots", "free"],
+            ]}
+            onRun={run}
+            loading={loading}
+          />
+          <CmdField
+            label="session plan"
+            placeholder="2h high  (hours + energy)"
+            command="plan"
+            onRun={run}
+            loading={loading}
+          />
+        </Section>
+
+        {/* ── Universal command ── */}
+        <Section title="terminal" prefix="$">
+          <UniversalCmd onRun={run} loading={loading} />
+        </Section>
+
+        {/* ── Loading indicator (mobile only — desktop shows in right pane) ── */}
+        {loading && (
+          <div className="lg:hidden">
+            <Thinking command={activeCommand} />
           </div>
         )}
+
+        {/* ── Mobile output ── */}
+        <div className="lg:hidden" ref={mobileOutputRef}>
+          {(output || error) && (
+            <div style={{ minHeight: "300px" }}>
+              <OutputArea
+                output={output ?? ""}
+                error={error}
+                command={activeCommand || undefined}
+              />
+            </div>
+          )}
+        </div>
       </div>
     </div>
+  );
+
+  return (
+    <>
+      {/* ── Mobile layout ── */}
+      <div
+        className="lg:hidden"
+        style={{ minHeight: "100vh" }}
+      >
+        {controlsPanel}
+      </div>
+
+      {/* ── Desktop layout: two-column ── */}
+      <div
+        className="hidden lg:grid"
+        style={{
+          gridTemplateColumns: "420px 1fr",
+          height: "100vh",
+          overflow: "hidden",
+        }}
+      >
+        {/* Left: controls */}
+        <div
+          style={{
+            borderRight: "1px solid var(--border)",
+            overflow: "hidden",
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
+          {controlsPanel}
+        </div>
+
+        {/* Right: output (persistent) */}
+        <div style={{ overflow: "hidden", display: "flex", flexDirection: "column" }}>
+          {loading ? (
+            <div style={{ padding: "16px" }}>
+              <Thinking command={activeCommand} />
+            </div>
+          ) : (
+            <OutputArea
+              output={output ?? ""}
+              error={error}
+              command={activeCommand || undefined}
+            />
+          )}
+        </div>
+      </div>
+    </>
   );
 }

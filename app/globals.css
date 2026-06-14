@@ -362,3 +362,91 @@ input:focus, textarea:focus {
   margin: 0.5em 0;
 }
 .prose-terminal a { color: var(--amber); text-decoration: underline; text-underline-offset: 2px; }
+
+/* ── Mode nav ──────────────────────────────────────────────── */
+.mode-nav {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
+  flex-shrink: 0;
+}
+.mode-nav::-webkit-scrollbar { display: none; }
+
+.mode-nav-btn {
+  padding: 9px 18px;
+  font-family: var(--font-terminal);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.12s;
+  position: relative;
+  bottom: -1px;
+}
+.mode-nav-btn:hover { color: var(--text-dim); }
+.mode-nav-btn.active {
+  color: var(--amber);
+  border-bottom-color: var(--amber);
+}
+
+/* ── Mode content transition ───────────────────────────────── */
+@keyframes mode-enter {
+  from { opacity: 0; transform: translateY(5px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.mode-enter { animation: mode-enter 0.18s ease forwards; }
+
+/* ── Inline action buttons (log/feedback in LazySun) ──────── */
+.inline-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  font-family: var(--font-terminal);
+  font-size: 11px;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--border-2);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.12s;
+  letter-spacing: 0.02em;
+}
+.inline-action:hover:not(:disabled) { color: var(--amber); border-color: var(--amber); background: var(--amber-glow); }
+.inline-action:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* ── Notice / info block ───────────────────────────────────── */
+.notice {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--text-faint);
+  border-radius: 3px;
+  font-size: 11px;
+  color: var(--text-faint);
+  line-height: 1.5;
+}
+
+/* ── Today mode stat chips ─────────────────────────────────── */
+.stat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  font-family: var(--font-terminal);
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.12s;
+  white-space: nowrap;
+}
+.stat-chip:hover { color: var(--amber); border-color: var(--amber); background: var(--amber-glow); }
+.stat-chip-label { color: var(--text-faint); margin-right: 1px; }
